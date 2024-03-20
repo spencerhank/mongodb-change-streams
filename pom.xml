@@ -37,7 +37,14 @@
             <artifactId>logback-classic</artifactId>
             <version>${logback-classic.version}</version>
         </dependency>
+        <!-- https://mvnrepository.com/artifact/com.solacesystems/sol-jcsmp -->
+        <dependency>
+            <groupId>com.solacesystems</groupId>
+            <artifactId>sol-jcsmp</artifactId>
+            <version>10.22.0</version>
+        </dependency>
     </dependencies>
+
 
     <build>
         <plugins>
