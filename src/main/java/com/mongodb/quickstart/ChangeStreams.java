@@ -30,6 +30,8 @@ public class ChangeStreams {
     // TODO: fetch lest event and get resume token value from LVQ
     private static BsonDocument resumeToken = null;
     private final static String topicString = "cdc/mongo/changestream/";
+    private final static TextMessage message = JCSMPFactory.onlyInstance().createMessage(TextMessage.class);
+    private static XMLMessageProducer producer = null;
 
     public static void main(String[] args) throws JCSMPException {
         ConnectionString connectionString = new ConnectionString(mongoDBURI);
@@ -62,7 +64,7 @@ public class ChangeStreams {
         try {
             jcsmpSession.connect();
 
-            final XMLMessageProducer producer = jcsmpSession.getMessageProducer(new JCSMPStreamingPublishCorrelatingEventHandler() {
+            producer = jcsmpSession.getMessageProducer(new JCSMPStreamingPublishCorrelatingEventHandler() {
                 @Override
                 public void responseReceivedEx(Object o) {
 
@@ -84,40 +86,27 @@ public class ChangeStreams {
                 MongoDatabase db = mongoClient.getDatabase(mongoDBName);
                 MongoCollection<SalesOrder> salesOrderCollection = db.getCollection(mongoDBCollection, SalesOrder.class);
                 List<Bson> pipeline = List.of(match(in("operationType", List.of("update", "insert", "delete"))));
-                ChangeStreamIterable<SalesOrder> salesOrderChangeStream;
-                final TextMessage message = JCSMPFactory.onlyInstance().createMessage(TextMessage.class);
                 if (resumeToken != null) {
-                    salesOrderCollection.watch(pipeline).resumeAfter(resumeToken).forEach(event -> {
-                        message.setText(event.toString());
-                        try {
-                            producer.send(message, JCSMPFactory.onlyInstance().createTopic(topicString + "/transactions/" + event.getFullDocument().getDistributionChannel() + "/" + event.getFullDocument().getSalesOrderNumber() ));
-                            message.reset();
-                        } catch (JCSMPException e) {
-                            System.out.printf("### Caught while trying to producer.send(): %s%n",e);
-                        }
-
-                    });
+                    salesOrderCollection.watch(pipeline).resumeAfter(resumeToken).forEach(sendChangeStreamDocumentUpdate);
                 } else {
-                    salesOrderCollection.watch(pipeline).forEach(event -> {
-
-                        message.setText(event.toString());
-                        try {
-                            producer.send(message, JCSMPFactory.onlyInstance().createTopic(topicString + "transactions/" + event.getFullDocument().getDistributionChannel() + "/" + event.getFullDocument().getSalesOrderNumber() ));
-                            message.reset();
-                        } catch (JCSMPException e) {
-                            System.out.printf("### Caught while trying to producer.send(): %s%n",e);
-                        }
-
-                    });
+                    salesOrderCollection.watch(pipeline).forEach(sendChangeStreamDocumentUpdate);
                 }
             }
-
         } finally {
             if (!jcsmpSession.isClosed()) {
                 jcsmpSession.closeSession();
             }
         }
-
     }
+
+    private static final Consumer<ChangeStreamDocument<SalesOrder>> sendChangeStreamDocumentUpdate = event -> {
+        message.setText(event.toString());
+        try {
+            producer.send(message, JCSMPFactory.onlyInstance().createTopic(topicString + "transactions/" + event.getFullDocument().getDistributionChannel() + "/" + event.getFullDocument().getSalesOrderNumber() ));
+            message.reset();
+        } catch (JCSMPException e) {
+            System.out.printf("### Caught while trying to producer.send(): %s%n",e);
+        }
+    };
 
 }
