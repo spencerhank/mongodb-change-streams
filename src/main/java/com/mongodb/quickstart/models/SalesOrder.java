@@ -1,16 +1,20 @@
 package com.mongodb.quickstart.models;
 
+import org.bson.BsonDocument;
+import org.bson.BsonType;
 import org.bson.codecs.pojo.annotations.BsonCreator;
 import org.bson.codecs.pojo.annotations.BsonId;
 import org.bson.codecs.pojo.annotations.BsonProperty;
-import org.bson.types.ObjectId;
+import org.bson.codecs.pojo.annotations.BsonRepresentation;
 
+import java.io.Serializable;
 import java.util.List;
 import java.util.Objects;
 
-public class SalesOrder {
+public class SalesOrder implements Serializable {
     @BsonId
-    private ObjectId id;
+    @BsonRepresentation(BsonType.OBJECT_ID)
+    private String id;
     @BsonProperty
     private String salesOrderNumber;
     @BsonProperty
@@ -33,6 +37,9 @@ public class SalesOrder {
     private String currency;
     @BsonProperty
     private Customer customer;
+    @BsonProperty()
+    @BsonRepresentation(BsonType.DOCUMENT)
+    private String resumeToken;
 
     private List<OrderItem> orderItem;
 
@@ -42,7 +49,7 @@ public class SalesOrder {
     }
 
 
-    public SalesOrder(ObjectId id, String salesOrderNumber, String creator, String date, String salesType, String orderType, String salesOrg, String distributionChannel, String division, String netValue, String currency, Customer customer, List<OrderItem> orderItem) {
+    public SalesOrder(String id, String salesOrderNumber, String creator, String date, String salesType, String orderType, String salesOrg, String distributionChannel, String division, String netValue, String currency, Customer customer, String resumeToken, List<OrderItem> orderItem) {
         this.id = id;
         this.salesOrderNumber = salesOrderNumber;
         this.creator = creator;
@@ -55,16 +62,17 @@ public class SalesOrder {
         this.netValue = netValue;
         this.currency = currency;
         this.customer = customer;
+        this.resumeToken = resumeToken;
         this.orderItem = orderItem;
     }
 
     // Getters and Setters
 
-    public ObjectId getId() {
+    public String getId() {
         return id;
     }
 
-    public void setId(ObjectId id) {
+    public void setId(String id) {
         this.id = id;
     }
 
@@ -164,6 +172,14 @@ public class SalesOrder {
         this.orderItem = orderItem;
     }
 
+    public String getResumeToken() {
+        return resumeToken;
+    }
+
+    public void setResumeToken(String resumeToken) {
+        this.resumeToken = resumeToken;
+    }
+
 
     @Override
     public boolean equals(Object o) {
@@ -175,7 +191,7 @@ public class SalesOrder {
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, salesOrderNumber, creator, date, salesType, orderType, salesOrg, distributionChannel, division, netValue, currency, customer, orderItem);
+        return Objects.hash(id, salesOrderNumber, creator, date, salesType, orderType, salesOrg, distributionChannel, division, netValue, currency, customer, orderItem, resumeToken);
     }
 
     @Override
@@ -194,6 +210,7 @@ public class SalesOrder {
                 ", currency='" + currency + '\'' +
                 ", customer=" + customer +
                 ", orderItem=" + orderItem +
+                ", resumeToken=" + resumeToken +
                 '}';
     }
 }

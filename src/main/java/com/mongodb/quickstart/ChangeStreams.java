@@ -1,12 +1,20 @@
 package com.mongodb.quickstart;
 
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
-import com.mongodb.client.*;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.changestream.ChangeStreamDocument;
-import com.mongodb.quickstart.models.Grade;
 import com.mongodb.quickstart.models.SalesOrder;
-import com.solacesystems.jcsmp.*;
+import com.solacesystems.jcsmp.JCSMPException;
+import com.solacesystems.jcsmp.JCSMPFactory;
+import com.solacesystems.jcsmp.TextMessage;
+import com.solacesystems.jcsmp.XMLMessageProducer;
 import org.bson.BsonDocument;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.bson.codecs.pojo.PojoCodecProvider;
@@ -16,9 +24,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import static com.mongodb.client.model.Aggregates.match;
-import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.in;
-import static com.mongodb.client.model.changestream.FullDocument.UPDATE_LOOKUP;
 import static org.bson.codecs.configuration.CodecRegistries.fromProviders;
 import static org.bson.codecs.configuration.CodecRegistries.fromRegistries;
 
@@ -32,55 +38,26 @@ public class ChangeStreams {
     private final static String topicString = "cdc/mongo/changestream/";
     private final static TextMessage message = JCSMPFactory.onlyInstance().createMessage(TextMessage.class);
     private static XMLMessageProducer producer = null;
+    private static CodecRegistry codecRegistry = null;
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
+
 
     public static void main(String[] args) throws JCSMPException {
         ConnectionString connectionString = new ConnectionString(mongoDBURI);
         CodecRegistry pojoCodecRegistry = fromProviders(PojoCodecProvider.builder().automatic(true).build());
-        CodecRegistry codecRegistry = fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), pojoCodecRegistry);
+        codecRegistry = fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), pojoCodecRegistry);
         MongoClientSettings clientSettings = MongoClientSettings.builder()
                 .applyConnectionString(connectionString)
                 .codecRegistry(codecRegistry)
                 .build();
 
-        // Configure Solace Connection
-        final JCSMPProperties properties = new JCSMPProperties();
-        properties.setProperty(JCSMPProperties.HOST, "tcp://localhost:55554");
-        properties.setProperty(JCSMPProperties.VPN_NAME, "default");
-        properties.setProperty(JCSMPProperties.USERNAME, "connector");
-        properties.setProperty(JCSMPProperties.PASSWORD, "connector");
 
-        JCSMPChannelProperties channelProperties = new JCSMPChannelProperties();
-        channelProperties.setReconnectRetries(20);
-        channelProperties.setConnectRetriesPerHost(5);
-        properties.setProperty(JCSMPProperties.CLIENT_CHANNEL_PROPERTIES, channelProperties);
 
-        final JCSMPSession jcsmpSession;
-        jcsmpSession = JCSMPFactory.onlyInstance().createSession(properties, null, new SessionEventHandler() {
-            @Override
-            public void handleEvent(SessionEventArgs sessionEventArgs) {
-                System.out.printf("### Received a Session event: %s%n", sessionEventArgs);
-            }
-        });
+        SolaceUtility.initializeAndConnectionSession();
         try {
-            jcsmpSession.connect();
-
-            producer = jcsmpSession.getMessageProducer(new JCSMPStreamingPublishCorrelatingEventHandler() {
-                @Override
-                public void responseReceivedEx(Object o) {
-
-                }
-
-                @Override
-                public void handleErrorEx(Object key, JCSMPException cause, long l) {
-                    System.out.printf("### Producer handleErrorEx() callback: %s%n", cause);
-                    if (cause instanceof JCSMPErrorResponseException) {  // might have some extra info
-                        JCSMPErrorResponseException e = (JCSMPErrorResponseException) cause;
-                        System.out.println(JCSMPErrorResponseSubcodeEx.getSubcodeAsString(e.getSubcodeEx())
-                                + ": " + e.getResponsePhrase());
-                        System.out.println(cause);
-                    }
-                }
-            });
+            resumeToken = SolaceUtility.getResumeToken();
+            producer = SolaceUtility.getMessageProducer();
 
             try (MongoClient mongoClient = MongoClients.create(clientSettings)) {
                 MongoDatabase db = mongoClient.getDatabase(mongoDBName);
@@ -93,18 +70,18 @@ public class ChangeStreams {
                 }
             }
         } finally {
-            if (!jcsmpSession.isClosed()) {
-                jcsmpSession.closeSession();
-            }
+            SolaceUtility.closeSession();
         }
     }
 
     private static final Consumer<ChangeStreamDocument<SalesOrder>> sendChangeStreamDocumentUpdate = event -> {
-        message.setText(event.toString());
         try {
+            SalesOrder salesOrder = event.getFullDocument();
+            salesOrder.setResumeToken(event.getResumeToken().toJson());
+            message.setText(objectMapper.writeValueAsString(salesOrder));
             producer.send(message, JCSMPFactory.onlyInstance().createTopic(topicString + "transactions/" + event.getFullDocument().getDistributionChannel() + "/" + event.getFullDocument().getSalesOrderNumber() ));
             message.reset();
-        } catch (JCSMPException e) {
+        } catch (JCSMPException | JsonProcessingException e) {
             System.out.printf("### Caught while trying to producer.send(): %s%n",e);
         }
     };
