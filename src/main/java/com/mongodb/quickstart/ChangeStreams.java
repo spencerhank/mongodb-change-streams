@@ -27,18 +27,20 @@ import static com.mongodb.client.model.Aggregates.match;
 import static com.mongodb.client.model.Filters.in;
 import static org.bson.codecs.configuration.CodecRegistries.fromProviders;
 import static org.bson.codecs.configuration.CodecRegistries.fromRegistries;
-
+// TODO: Implement production readiness recommendations: https://medium.com/expedia-group-tech/mongo-change-streams-in-production-97a07c7c0420
+// 1. Include timestamp of document so we can restart based on timestamp in case oplog is deleted or resume token is not present in the current oplog
+// 2. Start new change stream if there is an issue with the old one
+// 3. make properties configurable
+// 4. Add ability to configure and start multiple change streams on separate threads
+// Note: Performance will be impacted if oplog becomes too large. Should be able to process ~6,0000 documents per second
 public class ChangeStreams {
 
     private final static String mongoDBURI = "mongodb://admin:admin@localhost:27017";
     private final static String mongoDBName = "demo";
     private final static String mongoDBCollection = "transactions";
-    // TODO: fetch lest event and get resume token value from LVQ
-    private static BsonDocument resumeToken = null;
     private final static String topicString = "cdc/mongo/changestream/";
     private final static TextMessage message = JCSMPFactory.onlyInstance().createMessage(TextMessage.class);
     private static XMLMessageProducer producer = null;
-    private static CodecRegistry codecRegistry = null;
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
 
@@ -46,7 +48,7 @@ public class ChangeStreams {
     public static void main(String[] args) throws JCSMPException {
         ConnectionString connectionString = new ConnectionString(mongoDBURI);
         CodecRegistry pojoCodecRegistry = fromProviders(PojoCodecProvider.builder().automatic(true).build());
-        codecRegistry = fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), pojoCodecRegistry);
+        CodecRegistry codecRegistry = fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), pojoCodecRegistry);
         MongoClientSettings clientSettings = MongoClientSettings.builder()
                 .applyConnectionString(connectionString)
                 .codecRegistry(codecRegistry)
@@ -56,7 +58,7 @@ public class ChangeStreams {
 
         SolaceUtility.initializeAndConnectionSession();
         try {
-            resumeToken = SolaceUtility.getResumeToken();
+            BsonDocument resumeToken = SolaceUtility.getResumeToken();
             producer = SolaceUtility.getMessageProducer();
 
             try (MongoClient mongoClient = MongoClients.create(clientSettings)) {
